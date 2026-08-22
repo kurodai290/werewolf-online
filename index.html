@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>オンライン人狼</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="app">
+  <h1>🐺 オンライン人狼</h1>
+  <p class="sub">5〜10人で遊べます</p>
+
+  <section id="home" class="card">
+    <input id="name" maxlength="12" placeholder="名前">
+    <button id="create">ルームを作る</button>
+    <div class="line">または</div>
+    <input id="code" maxlength="6" placeholder="ルームコード">
+    <button id="join">ルームに参加</button>
+  </section>
+
+  <section id="room" class="card hidden">
+    <h2>ルーム <span id="roomCode"></span></h2>
+    <p id="phase">待機中</p>
+    <div id="players"></div>
+    <button id="start" class="hidden">ゲーム開始</button>
+  </section>
+
+  <section id="game" class="card hidden">
+    <h2 id="roleTitle">役職</h2>
+    <p id="roleText"></p>
+    <div id="actionArea"></div>
+  </section>
+
+  <section id="message" class="message"></section>
+</main>
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,316 +1,641 @@
-const path = require("path");
-const http = require("http");
 const express = require("express");
+const http = require("http");
 const { Server } = require("socket.io");
 const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
-
 const io = new Server(server, {
   transports: ["polling", "websocket"],
   cors: {
     origin: true,
-    methods: ["GET", "POST"],
-    credentials: true
+    methods: ["GET", "POST"]
   }
 });
 
-const PORT = Number(process.env.PORT) || 3000;
-const PUBLIC_DIR = path.join(__dirname, "public");
+const PORT = process.env.PORT || 3000;
+
+app.use(express.static("public"));
+
 const rooms = new Map();
 const MAX = 10;
 
 const ROLES = {
-  5: ["人狼","占い師","騎士","村人","村人"],
-  6: ["人狼","人狼","占い師","騎士","村人","村人"],
-  7: ["人狼","人狼","占い師","騎士","霊媒師","村人","村人"],
-  8: ["人狼","人狼","占い師","騎士","霊媒師","村人","村人"],
-  9: ["人狼","人狼","人狼","占い師","騎士","霊媒師","村人","村人","村人"],
-  10:["人狼","人狼","人狼","占い師","騎士","霊媒師","村人","村人","村人","村人"]
+  5: ["人狼", "占い師", "騎士", "村人", "村人"],
+  6: ["人狼", "人狼", "占い師", "騎士", "村人", "村人"],
+  7: ["人狼", "人狼", "占い師", "騎士", "霊媒師", "村人", "村人"],
+  8: ["人狼", "人狼", "占い師", "騎士", "霊媒師", "村人", "村人", "村人"],
+  9: ["人狼", "人狼", "人狼", "占い師", "騎士", "霊媒師", "村人", "村人", "村人"],
+  10: ["人狼", "人狼", "人狼", "占い師", "騎士", "霊媒師", "村人", "村人", "村人", "村人"]
 };
 
-const shuffle = arr => [...arr].sort(() => Math.random() - 0.5);
+const shuffle = array => {
+  return [...array].sort(() => Math.random() - 0.5);
+};
 
-function makeCode() {
-  let c;
+function createRoomCode() {
+  let code;
+
   do {
-    c = crypto.randomBytes(3).toString("hex").toUpperCase();
-  } while (rooms.has(c));
-  return c;
+    code = crypto.randomBytes(3).toString("hex").toUpperCase();
+  } while (rooms.has(code));
+
+  return code;
 }
 
 function publicPlayers(room) {
-  return room.players.map(p => ({
-    id: p.id,
-    name: p.name,
-    alive: p.alive,
-    host: p.host
+  return room.players.map(player => ({
+    id: player.id,
+    name: player.name,
+    alive: player.alive,
+    host: player.host
   }));
 }
 
-function update(room) {
+function updateRoom(room) {
   io.to(room.code).emit("room:update", {
     code: room.code,
     phase: room.phase,
     day: room.day,
     players: publicPlayers(room),
     started: room.started,
-    winner: room.winner
+    winner: room.winner,
+
+    // 最初に部屋を作った人
+    ownerId: room.ownerId
   });
 }
 
-function winner(room) {
-  const alive = room.players.filter(p => p.alive);
-  const wolves = alive.filter(p => p.role === "人狼").length;
-  if (wolves === 0) return "村人陣営";
-  if (wolves >= alive.length - wolves) return "人狼陣営";
+function checkWinner(room) {
+  const alivePlayers = room.players.filter(player => player.alive);
+
+  const wolves = alivePlayers.filter(
+    player => player.role === "人狼"
+  ).length;
+
+  if (wolves === 0) {
+    return "村人陣営";
+  }
+
+  if (wolves >= alivePlayers.length - wolves) {
+    return "人狼陣営";
+  }
+
   return null;
 }
 
-function beginNight(room) {
+function startNight(room) {
   room.phase = "night";
   room.day++;
-  room.votes = {};
-  room.night = { wolf: null, seer: null, guard: null };
 
-  room.players.forEach(p => {
-    if (p.alive) {
-      p.socket.emit("game:role", {
-        role: p.role,
-        teammateIds: room.players
-          .filter(x => x.role === "人狼" && x.id !== p.id)
-          .map(x => x.id)
-      });
-    }
+  room.votes = {};
+
+  room.night = {
+    wolf: null,
+    seer: null,
+    guard: null
+  };
+
+  room.players.forEach(player => {
+    if (!player.alive) return;
+
+    player.socket.emit("game:role", {
+      role: player.role,
+
+      teammateIds: room.players
+        .filter(
+          other =>
+            other.role === "人狼" &&
+            other.id !== player.id
+        )
+        .map(other => other.id)
+    });
   });
 
-  update(room);
+  updateRoom(room);
 }
 
 function resolveNight(room) {
-  if (room.night.wolf && room.night.guard !== room.night.wolf) {
-    const target = room.players.find(p => p.id === room.night.wolf);
-    if (target) target.alive = false;
+  if (
+    room.night.wolf &&
+    room.night.guard !== room.night.wolf
+  ) {
+    const target = room.players.find(
+      player => player.id === room.night.wolf
+    );
+
+    if (target) {
+      target.alive = false;
+    }
   }
 
-  const w = winner(room);
-  if (w) {
-    room.winner = w;
+  const winner = checkWinner(room);
+
+  if (winner) {
+    room.winner = winner;
     room.phase = "finished";
   } else {
     room.phase = "day";
     room.votes = {};
   }
 
-  update(room);
+  updateRoom(room);
 }
-
-function allNightActionsDone(room) {
-  const alive = room.players.filter(p => p.alive);
-  const hasWolf = alive.some(p => p.role === "人狼");
-  const hasSeer = alive.some(p => p.role === "占い師");
-  const hasGuard = alive.some(p => p.role === "騎士");
-
-  return (!hasWolf || !!room.night.wolf) &&
-         (!hasSeer || !!room.night.seer) &&
-         (!hasGuard || !!room.night.guard);
-}
-
-app.disable("x-powered-by");
-app.use(express.json());
-app.use(express.static(PUBLIC_DIR));
-
-app.get("/", (req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
-});
-
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    ok: true,
-    service: "werewolf-online",
-    socketio: true,
-    port: PORT,
-    time: new Date().toISOString()
-  });
-});
 
 io.on("connection", socket => {
-  console.log(`[Socket.IO] connected ${socket.id} transport=${socket.conn.transport.name}`);
 
-  socket.on("room:create", ({ name } = {}) => {
-    name = String(name || "").trim().slice(0, 12);
-    if (!name) return socket.emit("error:msg", "名前を入力してください。");
+  console.log("Connected:", socket.id);
 
-    const code = makeCode();
+  // ========================================
+  // ルーム作成
+  // ========================================
+
+  socket.on("room:create", ({ name }) => {
+
+    name = String(name || "")
+      .trim()
+      .slice(0, 12);
+
+    if (!name) {
+      return socket.emit(
+        "error:msg",
+        "名前を入力してください。"
+      );
+    }
+
+    const code = createRoomCode();
+
     const room = {
       code,
+
+      // ★最初に部屋を作った人
+      ownerId: socket.id,
+
       players: [],
+
       started: false,
+
       phase: "lobby",
+
       day: 0,
+
       votes: {},
+
       night: {},
+
       winner: null
     };
 
     room.players.push({
       id: socket.id,
-      socket,
-      name,
+      socket: socket,
+
+      name: name,
+
+      // 最初の人なのでホスト
       host: true,
+
       alive: true,
+
       role: null
     });
 
     rooms.set(code, room);
+
     socket.join(code);
+
     socket.data.room = code;
 
-    socket.emit("room:joined", { code });
-    update(room);
+    socket.emit("room:joined", {
+      code: code
+    });
+
+    updateRoom(room);
   });
 
-  socket.on("room:join", ({ code, name } = {}) => {
-    code = String(code || "").trim().toUpperCase();
-    name = String(name || "").trim().slice(0, 12);
+
+  // ========================================
+  // ルーム参加
+  // ========================================
+
+  socket.on("room:join", ({ code, name }) => {
+
+    code = String(code || "")
+      .trim()
+      .toUpperCase();
+
+    name = String(name || "")
+      .trim()
+      .slice(0, 12);
 
     const room = rooms.get(code);
 
-    if (!name) return socket.emit("error:msg", "名前を入力してください。");
-    if (!room) return socket.emit("error:msg", "そのルームはありません。");
-    if (room.started) return socket.emit("error:msg", "ゲームはすでに始まっています。");
-    if (room.players.length >= MAX) return socket.emit("error:msg", "満員です。");
+    if (!name) {
+      return socket.emit(
+        "error:msg",
+        "名前を入力してください。"
+      );
+    }
 
-    if (room.players.some(p => p.name === name)) {
-      return socket.emit("error:msg", "その名前はすでに使われています。");
+    if (!room) {
+      return socket.emit(
+        "error:msg",
+        "そのルームはありません。"
+      );
+    }
+
+    if (room.started) {
+      return socket.emit(
+        "error:msg",
+        "ゲームはすでに始まっています。"
+      );
+    }
+
+    if (room.players.length >= MAX) {
+      return socket.emit(
+        "error:msg",
+        "満員です。"
+      );
     }
 
     room.players.push({
       id: socket.id,
-      socket,
-      name,
+      socket: socket,
+
+      name: name,
+
       host: false,
+
       alive: true,
+
       role: null
     });
 
     socket.join(code);
+
     socket.data.room = code;
 
-    socket.emit("room:joined", { code });
-    update(room);
+    socket.emit("room:joined", {
+      code: code
+    });
+
+    updateRoom(room);
   });
 
+
+  // ========================================
+  // ゲーム開始
+  // ========================================
+
   socket.on("game:start", () => {
+
     const room = rooms.get(socket.data.room);
+
     if (!room) return;
 
-    const me = room.players.find(p => p.id === socket.id);
-    if (!me?.host) return socket.emit("error:msg", "ホストだけが開始できます。");
-    if (room.players.length < 5) return socket.emit("error:msg", "5人以上で開始してください。");
+    const me = room.players.find(
+      player => player.id === socket.id
+    );
+
+    if (!me?.host) {
+      return socket.emit(
+        "error:msg",
+        "ホストだけが開始できます。"
+      );
+    }
+
+    if (room.players.length < 5) {
+      return socket.emit(
+        "error:msg",
+        "5人以上で開始してください。"
+      );
+    }
 
     const roles = ROLES[room.players.length];
-    shuffle(room.players).forEach((p, i) => {
-      p.role = roles[i];
-      p.alive = true;
+
+    shuffle(room.players).forEach((player, index) => {
+
+      player.role = roles[index];
+
+      player.alive = true;
+
     });
 
     room.started = true;
+
     room.winner = null;
+
     room.day = 0;
 
-    beginNight(room);
+    startNight(room);
   });
 
-  socket.on("action:night", ({ action, targetId } = {}) => {
-    const room = rooms.get(socket.data.room);
-    if (!room || room.phase !== "night") return;
 
-    const me = room.players.find(p => p.id === socket.id);
-    const target = room.players.find(p => p.id === targetId);
+  // ========================================
+  // 夜の行動
+  // ========================================
 
-    if (!me?.alive || !target?.alive || target.id === me.id) return;
+  socket.on(
+    "action:night",
+    ({ action, targetId }) => {
 
-    if (action === "wolf" && me.role === "人狼") {
-      room.night.wolf = target.id;
+      const room = rooms.get(socket.data.room);
+
+      if (!room || room.phase !== "night") {
+        return;
+      }
+
+      const me = room.players.find(
+        player => player.id === socket.id
+      );
+
+      const target = room.players.find(
+        player => player.id === targetId
+      );
+
+      if (
+        !me?.alive ||
+        !target?.alive ||
+        target.id === me.id
+      ) {
+        return;
+      }
+
+      if (
+        action === "wolf" &&
+        me.role === "人狼"
+      ) {
+        room.night.wolf = target.id;
+      }
+
+      if (
+        action === "seer" &&
+        me.role === "占い師"
+      ) {
+
+        socket.emit(
+          "action:result",
+          {
+            text:
+              `${target.name}さんは` +
+              `${target.role === "人狼"
+                ? "人狼"
+                : "人狼ではありません"}。`
+          }
+        );
+
+        room.night.seer = target.id;
+      }
+
+      if (
+        action === "guard" &&
+        me.role === "騎士"
+      ) {
+        room.night.guard = target.id;
+      }
+
+      const alivePlayers =
+        room.players.filter(
+          player => player.alive
+        );
+
+      const wolvesDone =
+        alivePlayers
+          .filter(player => player.role === "人狼")
+          .every(() => room.night.wolf);
+
+      const seerDone =
+        alivePlayers
+          .filter(player => player.role === "占い師")
+          .every(() => room.night.seer);
+
+      const guardDone =
+        alivePlayers
+          .filter(player => player.role === "騎士")
+          .every(() => room.night.guard);
+
+      if (
+        wolvesDone &&
+        seerDone &&
+        guardDone
+      ) {
+        resolveNight(room);
+      }
     }
+  );
 
-    if (action === "seer" && me.role === "占い師") {
-      socket.emit("action:result", {
-        text: `${target.name}さんは${target.role === "人狼" ? "人狼" : "人狼ではありません"}。`
+
+  // ========================================
+  // 投票
+  // ========================================
+
+  socket.on(
+    "action:vote",
+    ({ targetId }) => {
+
+      const room = rooms.get(socket.data.room);
+
+      if (!room || room.phase !== "day") {
+        return;
+      }
+
+      const me = room.players.find(
+        player => player.id === socket.id
+      );
+
+      const target = room.players.find(
+        player => player.id === targetId
+      );
+
+      if (
+        !me?.alive ||
+        !target?.alive ||
+        target.id === me.id
+      ) {
+        return;
+      }
+
+      room.votes[me.id] = target.id;
+
+      const alivePlayers =
+        room.players.filter(
+          player => player.alive
+        );
+
+      if (
+        Object.keys(room.votes).length <
+        alivePlayers.length
+      ) {
+        return;
+      }
+
+      const counts = {};
+
+      Object.values(room.votes).forEach(id => {
+        counts[id] =
+          (counts[id] || 0) + 1;
       });
-      room.night.seer = target.id;
-    }
 
-    if (action === "guard" && me.role === "騎士") {
-      room.night.guard = target.id;
-    }
+      const maxVotes =
+        Math.max(...Object.values(counts));
 
-    if (allNightActionsDone(room)) {
-      resolveNight(room);
-    }
-  });
+      const topPlayers =
+        Object.keys(counts).filter(
+          id => counts[id] === maxVotes
+        );
 
-  socket.on("action:vote", ({ targetId } = {}) => {
+      if (topPlayers.length === 1) {
+
+        const eliminated =
+          room.players.find(
+            player => player.id === topPlayers[0]
+          );
+
+        if (eliminated) {
+          eliminated.alive = false;
+        }
+      }
+
+      const winner = checkWinner(room);
+
+      if (winner) {
+
+        room.winner = winner;
+
+        room.phase = "finished";
+
+        updateRoom(room);
+
+      } else {
+
+        startNight(room);
+
+      }
+    }
+  );
+
+
+  // ========================================
+  // ★ 管理者によるリセット
+  // ========================================
+
+  socket.on("room:reset", () => {
+
     const room = rooms.get(socket.data.room);
-    if (!room || room.phase !== "day") return;
 
-    const me = room.players.find(p => p.id === socket.id);
-    const target = room.players.find(p => p.id === targetId);
+    if (!room) {
+      return socket.emit(
+        "error:msg",
+        "ルームに参加していません。"
+      );
+    }
 
-    if (!me?.alive || !target?.alive || target.id === me.id) return;
+    // ★最初に部屋を作った人だけ
+    if (room.ownerId !== socket.id) {
 
-    room.votes[me.id] = target.id;
+      return socket.emit(
+        "error:msg",
+        "リセットできるのは、最初に部屋を作った管理者だけです。"
+      );
+    }
 
-    const alive = room.players.filter(p => p.alive);
-    if (Object.keys(room.votes).length < alive.length) return;
+    // ゲーム状態を初期化
 
-    const counts = {};
-    Object.values(room.votes).forEach(id => {
-      counts[id] = (counts[id] || 0) + 1;
+    room.started = false;
+
+    room.phase = "lobby";
+
+    room.day = 0;
+
+    room.votes = {};
+
+    room.night = {};
+
+    room.winner = null;
+
+
+    // 全員を生存状態に戻す
+
+    room.players.forEach(player => {
+
+      player.role = null;
+
+      player.alive = true;
+
     });
 
-    const max = Math.max(...Object.values(counts));
-    const top = Object.keys(counts).filter(id => counts[id] === max);
 
-    if (top.length === 1) {
-      const out = room.players.find(p => p.id === top[0]);
-      if (out) out.alive = false;
-    }
+    // 全員にリセット通知
 
-    const w = winner(room);
-    if (w) {
-      room.winner = w;
-      room.phase = "finished";
-      update(room);
-    } else {
-      beginNight(room);
-    }
+    io.to(room.code).emit(
+      "room:reset",
+      {
+        message:
+          "管理者がゲームをリセットしました。"
+      }
+    );
+
+
+    // 全員の画面を更新
+
+    updateRoom(room);
+
   });
 
-  socket.on("disconnect", reason => {
-    console.log(`[Socket.IO] disconnected ${socket.id} reason=${reason}`);
 
-    const room = rooms.get(socket.data.room);
+  // ========================================
+  // 切断
+  // ========================================
+
+  socket.on("disconnect", () => {
+
+    const room =
+      rooms.get(socket.data.room);
+
     if (!room) return;
 
-    const index = room.players.findIndex(p => p.id === socket.id);
-    if (index >= 0) room.players.splice(index, 1);
+    const index =
+      room.players.findIndex(
+        player => player.id === socket.id
+      );
+
+    if (index >= 0) {
+      room.players.splice(index, 1);
+    }
 
     if (!room.players.length) {
+
       rooms.delete(room.code);
+
       return;
     }
 
-    if (!room.players.some(p => p.host)) {
+
+    // 現在のホストがいなくなった場合
+    // 次の人をホストにする
+
+    if (
+      !room.players.some(
+        player => player.host
+      )
+    ) {
+
       room.players[0].host = true;
     }
 
-    update(room);
+
+    updateRoom(room);
   });
+
 });
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Werewolf Online listening on 0.0.0.0:${PORT}`);
-});
+
+server.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log(
+      "Werewolf Online on " + PORT
+    );
+  }
+);

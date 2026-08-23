@@ -1,16 +1,26 @@
-# Werewolf Online Railway修正版
+# Railway設定（重要）
 
-GitHubのリポジトリへこのフォルダの中身をアップロードし、RailwayでDeployしてください。
+このプロジェクトは GitHub リポジトリのルートに以下がある構成で使います。
 
-Start Command:
-npm start
+- package.json
+- server.js
+- railway.json
+- public/index.html
+- public/app.js
+- public/style.css
 
-Deploy後、RailwayのPublic Domainを開いてください。
+Railway:
+1. GitHubリポジトリをServiceとしてDeploy
+2. Root Directoryを空欄（リポジトリのルート）にする
+3. Start Commandは `npm start`
+4. Public DomainをこのServiceに発行
+5. そのPublic Domainを開く
 
-動作確認:
-https://あなたのRailwayドメイン/health
+確認URL:
+`https://あなたのRailwayドメイン/health`
 
-ok: true が返ればサーバーは起動しています。
+`ok: true` が返れば、このNode.jsサーバーに到達しています。
 
-フロントエンドとSocket.IOを同じNode.jsサーバーから配信する構成です。
-GitHub Pagesなどへpublicフォルダを別公開しないでください。
+注意:
+GitHub Pages等でpublic/index.htmlを別公開しないでください。
+ゲーム画面とSocket.IOは同じRailway Serviceから配信します。

@@ -1,151 +1,287 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 
 <head>
-
   <meta charset="UTF-8">
 
   <meta
     name="viewport"
-    content="width=device-width,initial-scale=1"
+    content="width=device-width, initial-scale=1.0"
   >
 
   <title>オンライン人狼</title>
 
-  <link
-    rel="stylesheet"
-    href="style.css"
-  >
-
+  <link rel="stylesheet" href="style.css">
 </head>
-
 
 <body>
 
-<main class="app">
+  <main class="app">
 
-  <h1>🐺 オンライン人狼</h1>
+    <!-- =========================
+         タイトル
+    ========================== -->
 
-  <p class="sub">
-    5〜10人で遊べます
-  </p>
+    <header class="header">
+
+      <h1>🐺 オンライン人狼</h1>
+
+      <p>
+        5〜10人で遊べるオンライン人狼
+      </p>
+
+    </header>
 
 
-  <!-- ================= -->
-  <!-- ホーム -->
-  <!-- ================= -->
+    <!-- =========================
+         ホーム
+    ========================== -->
 
-  <section
-    id="home"
-    class="card"
-  >
-
-    <input
-      id="name"
-      maxlength="12"
-      placeholder="名前"
+    <section
+      id="home"
+      class="card"
     >
 
-    <button id="create">
-      ルームを作る
-    </button>
+      <h2>ゲームに参加</h2>
 
-    <div class="line">
-      または
+      <label for="name">
+        プレイヤー名
+      </label>
+
+      <input
+        id="name"
+        type="text"
+        maxlength="12"
+        placeholder="名前を入力"
+        autocomplete="off"
+      >
+
+
+      <button id="create">
+        🏠 ルームを作る
+      </button>
+
+
+      <div class="or">
+        または
+      </div>
+
+
+      <label for="code">
+        ルームコード
+      </label>
+
+      <input
+        id="code"
+        type="text"
+        maxlength="6"
+        placeholder="例：ABC123"
+        autocomplete="off"
+      >
+
+
+      <button id="join">
+        🚪 ルームに参加
+      </button>
+
+    </section>
+
+
+    <!-- =========================
+         ルーム
+    ========================== -->
+
+    <section
+      id="room"
+      class="card hidden"
+    >
+
+      <div class="room-header">
+
+        <div>
+
+          <h2>
+            ルーム
+          </h2>
+
+          <div
+            id="roomCode"
+            class="room-code"
+          >
+            ------
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- =====================
+           ゲーム進行
+      ====================== -->
+
+      <div
+        id="progress"
+        class="progress"
+      >
+
+        <div
+          id="progressIcon"
+          class="progress-icon"
+        >
+          ⏳
+        </div>
+
+        <div class="progress-content">
+
+          <div
+            id="progressTitle"
+            class="progress-title"
+          >
+            待機中
+          </div>
+
+          <div
+            id="progressDescription"
+            class="progress-description"
+          >
+            プレイヤーを待っています。
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- =====================
+           プレイヤー人数
+      ====================== -->
+
+      <div
+        id="playerCount"
+        class="player-count"
+      >
+        0 / 10人
+      </div>
+
+
+      <!-- =====================
+           プレイヤー一覧
+      ====================== -->
+
+      <div
+        id="players"
+        class="players"
+      >
+      </div>
+
+
+      <!-- =====================
+           ゲーム開始
+      ====================== -->
+
+      <button
+        id="start"
+        class="start-button hidden"
+      >
+        🎮 ゲーム開始
+      </button>
+
+
+      <!-- =====================
+           管理者リセット
+      ====================== -->
+
+      <button
+        id="reset"
+        class="reset-button hidden"
+      >
+        🔄 ゲームをリセット
+      </button>
+
+    </section>
+
+
+    <!-- =========================
+         ゲーム画面
+    ========================== -->
+
+    <section
+      id="game"
+      class="card hidden"
+    >
+
+      <div
+        id="gameStatus"
+        class="game-status"
+      >
+      </div>
+
+
+      <!-- 役職 -->
+
+      <div
+        id="roleBox"
+        class="role-box"
+      >
+
+        <div class="role-label">
+          あなたの役職
+        </div>
+
+        <div
+          id="roleText"
+          class="role-text"
+        >
+          ---
+        </div>
+
+      </div>
+
+
+      <!-- 説明 -->
+
+      <div
+        id="gameInstruction"
+        class="instruction"
+      >
+      </div>
+
+
+      <!-- 行動 -->
+
+      <div
+        id="actionArea"
+        class="action-area"
+      >
+      </div>
+
+    </section>
+
+
+    <!-- =========================
+         メッセージ
+    ========================== -->
+
+    <div
+      id="message"
+      class="message"
+    >
     </div>
 
-    <input
-      id="code"
-      maxlength="6"
-      placeholder="ルームコード"
-    >
-
-    <button id="join">
-      ルームに参加
-    </button>
-
-  </section>
+  </main>
 
 
-  <!-- ================= -->
-  <!-- ルーム -->
-  <!-- ================= -->
+  <!-- Socket.IO -->
 
-  <section
-    id="room"
-    class="card hidden"
-  >
-
-    <h2>
-      ルーム
-      <span id="roomCode"></span>
-    </h2>
-
-    <p id="phase">
-      待機中
-    </p>
-
-    <div id="players"></div>
+  <script
+    src="/socket.io/socket.io.js"
+  ></script>
 
 
-    <!-- ゲーム開始 -->
+  <!-- ゲーム本体 -->
 
-    <button
-      id="start"
-      class="hidden"
-    >
-      ゲーム開始
-    </button>
-
-
-    <!-- ★管理者リセット -->
-
-    <button
-      id="reset"
-      class="reset hidden"
-    >
-      🔄 ゲームをリセット
-    </button>
-
-  </section>
-
-
-  <!-- ================= -->
-  <!-- ゲーム -->
-  <!-- ================= -->
-
-  <section
-    id="game"
-    class="card hidden"
-  >
-
-    <h2 id="roleTitle">
-      役職
-    </h2>
-
-    <p id="roleText"></p>
-
-    <div id="actionArea"></div>
-
-  </section>
-
-
-  <!-- メッセージ -->
-
-  <section
-    id="message"
-    class="message"
-  ></section>
-
-
-</main>
-
-
-<script
-  src="https://cdn.socket.io/4.8.1/socket.io.min.js"
-></script>
-
-<script src="app.js"></script>
+  <script src="app.js"></script>
 
 </body>
 

@@ -56,16 +56,13 @@
         autocomplete="off"
       >
 
-
       <button id="create">
         🏠 ルームを作る
       </button>
 
-
       <div class="or">
         または
       </div>
-
 
       <label for="code">
         ルームコード
@@ -78,7 +75,6 @@
         placeholder="例：ABC123"
         autocomplete="off"
       >
-
 
       <button id="join">
         🚪 ルームに参加
@@ -112,6 +108,13 @@
           </div>
 
         </div>
+
+        <!-- ゲームマスター表示 -->
+
+        <div
+          id="gmLabel"
+          class="gm-label"
+        ></div>
 
       </div>
 
@@ -150,6 +153,18 @@
 
         </div>
 
+      </div>
+
+
+      <!-- =====================
+           フェーズ
+      ====================== -->
+
+      <div
+        id="phase"
+        class="phase"
+      >
+        待機中：0/10人
       </div>
 
 
@@ -218,14 +233,19 @@
       </div>
 
 
-      <!-- 役職 -->
+      <!-- =====================
+           役職
+      ====================== -->
 
       <div
         id="roleBox"
         class="role-box"
       >
 
-        <div class="role-label">
+        <div
+          id="roleTitle"
+          class="role-label"
+        >
           あなたの役職
         </div>
 
@@ -239,7 +259,9 @@
       </div>
 
 
-      <!-- 説明 -->
+      <!-- =====================
+           ゲーム説明
+      ====================== -->
 
       <div
         id="gameInstruction"
@@ -248,7 +270,9 @@
       </div>
 
 
-      <!-- 行動 -->
+      <!-- =====================
+           行動
+      ====================== -->
 
       <div
         id="actionArea"
@@ -272,14 +296,16 @@
   </main>
 
 
-  <!-- Socket.IO -->
+  <!-- =========================
+       Socket.IO
+  ========================== -->
 
-  <script
-    src="/socket.io/socket.io.js"
-  ></script>
+  <script src="/socket.io/socket.io.js"></script>
 
 
-  <!-- ゲーム本体 -->
+  <!-- =========================
+       ゲーム本体
+  ========================== -->
 
   <script src="app.js"></script>
 

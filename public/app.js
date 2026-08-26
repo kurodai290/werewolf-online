@@ -1,28 +1,55 @@
-let socket;
+let socket = null;
 
 let myId = null;
-
 let myRole = null;
-
 let room = null;
-
 let actionDone = false;
 
 
-const $ = id =>
-  document.getElementById(id);
+/* ====================================
+   DOM helper
+==================================== */
 
+const $ = (id) => document.getElementById(id);
 
-const msg = text => {
-  $("message").textContent = text;
+function setText(id, text) {
+  const el = $(id);
+  if (el) el.textContent = text;
+}
+
+function setHTML(id, html) {
+  const el = $(id);
+  if (el) el.innerHTML = html;
+}
+
+function addClass(id, className) {
+  const el = $(id);
+  if (el) el.classList.add(className);
+}
+
+function removeClass(id, className) {
+  const el = $(id);
+  if (el) el.classList.remove(className);
+}
+
+function toggleClass(id, className, hidden) {
+  const el = $(id);
+  if (el) el.classList.toggle(className, hidden);
+}
+
+const msg = (text) => {
+  setText("message", text);
 };
 
 
-function esc(text) {
+/* ====================================
+   HTMLエスケープ
+==================================== */
 
-  return String(text).replace(
+function esc(text) {
+  return String(text ?? "").replace(
     /[&<>"']/g,
-    char => ({
+    (char) => ({
       "&": "&amp;",
       "<": "&lt;",
       ">": "&gt;",
@@ -30,12 +57,14 @@ function esc(text) {
       "'": "&#039;"
     }[char])
   );
-
 }
 
 
-function emoji(role) {
+/* ====================================
+   役職アイコン
+==================================== */
 
+function emoji(role) {
   return ({
     "人狼": "🐺",
     "占い師": "🔮",
@@ -43,7 +72,6 @@ function emoji(role) {
     "霊媒師": "👻",
     "村人": "👤"
   })[role] || "❓";
-
 }
 
 
@@ -53,41 +81,178 @@ function emoji(role) {
 
 function render() {
 
-  if (
-    !room ||
-    !myRole ||
-    room.phase === "finished"
-  ) {
+  if (!room) return;
+
+  const actionArea = $("actionArea");
+
+  if (!actionArea) return;
+
+
+  /* ゲーム終了 */
+
+  if (room.phase === "finished") {
+
+    setHTML(
+      "actionArea",
+      `<div class="winner">
+        🏆 ${esc(room.winner || "ゲーム終了")}の勝利！
+      </div>`
+    );
+
     return;
   }
 
 
+  /* ロビー */
+
+  if (
+    !room.started ||
+    room.phase === "lobby"
+  ) {
+
+    actionArea.innerHTML = "";
+
+    return;
+  }
+
+
+  /* 自分を探す */
+
   const me =
-    room.players.find(
-      player => player.id === myId
-    );
+    Array.isArray(room.players)
+      ? room.players.find(
+          player => player.id === myId
+        )
+      : null;
 
 
-  if (!me?.alive) {
+  /* ====================================
+     GM判定
+  ==================================== */
 
-    $("actionArea").innerHTML =
+  const isGM =
+    room.gameMasterId === myId ||
+    room.gmId === myId ||
+    room.isGM === true ||
+    me?.gm === true ||
+    me?.gameMaster === true;
+
+
+  /* ====================================
+     GM画面
+  ==================================== */
+
+  if (isGM) {
+
+    actionArea.innerHTML = `
+      <div class="gm-panel">
+
+        <h3>👑 ゲームマスター</h3>
+
+        <p>
+          ゲームの進行を担当しています。
+        </p>
+
+        <button
+          id="gmNextDay"
+          type="button"
+        >
+          ⏭️ 次の日へ進める
+        </button>
+
+      </div>
+    `;
+
+
+    const gmButton =
+      $("gmNextDay");
+
+
+    if (gmButton) {
+
+      gmButton.onclick = () => {
+
+        if (!socket?.connected) {
+
+          return msg(
+            "サーバーに接続されていません。"
+          );
+
+        }
+
+
+        socket.emit(
+          "gm:next-day"
+        );
+
+
+        msg(
+          "次の日へ進めています…"
+        );
+
+      };
+
+    }
+
+
+    return;
+  }
+
+
+  /* ====================================
+     役職がまだ届いていない
+  ==================================== */
+
+  if (!myRole) {
+
+    actionArea.innerHTML =
+      "<p>役職情報を待っています…</p>";
+
+    return;
+  }
+
+
+  /* ====================================
+     脱落
+  ==================================== */
+
+  if (
+    me &&
+    !me.alive
+  ) {
+
+    actionArea.innerHTML =
       "<p>あなたは脱落しています。</p>";
 
     return;
   }
 
 
+  /* ====================================
+     行動済み
+  ==================================== */
+
   if (actionDone) {
 
-    $("actionArea").innerHTML =
+    actionArea.innerHTML =
       "<p>行動済みです。他のプレイヤーを待っています…</p>";
 
     return;
   }
 
 
+  /* ====================================
+     生存プレイヤー
+  ==================================== */
+
+  const players =
+    Array.isArray(room.players)
+      ? room.players
+      : [];
+
+
   const targets =
-    room.players.filter(
+    players.filter(
       player =>
         player.alive &&
         player.id !== myId
@@ -95,14 +260,22 @@ function render() {
 
 
   let html =
-    `<h3>${
-      room.phase === "night"
-        ? "夜の行動"
-        : "投票"
-    }</h3>`;
+    `<h3>
+      ${
+        room.phase === "night"
+          ? "🌙 夜の行動"
+          : "☀️ 投票"
+      }
+    </h3>`;
 
 
-  if (room.phase === "night") {
+  /* ====================================
+     夜
+  ==================================== */
+
+  if (
+    room.phase === "night"
+  ) {
 
     if (
       ![
@@ -112,43 +285,497 @@ function render() {
       ].includes(myRole)
     ) {
 
-      $("actionArea").innerHTML =
+      actionArea.innerHTML =
         "<p>夜は待機してください。</p>";
 
       return;
     }
 
 
-    html += targets
-      .map(
-        player =>
-          `<button
-            class="target"
-            onclick="night('${player.id}')"
-          >
-            ${esc(player.name)}
-          </button>`
-      )
-      .join("");
+    if (targets.length) {
 
-  } else {
+      html +=
+        targets
+          .map(
+            player =>
+              `<button
+                class="target"
+                data-action="night"
+                data-id="${esc(player.id)}"
+              >
+                ${esc(player.name)}
+              </button>`
+          )
+          .join("");
 
-    html += targets
-      .map(
-        player =>
-          `<button
-            class="target"
-            onclick="vote('${player.id}')"
-          >
-            🗳️ ${esc(player.name)}に投票
-          </button>`
-      )
-      .join("");
+    } else {
+
+      html +=
+        "<p>行動できる相手がいません。</p>";
+
+    }
 
   }
 
 
-  $("actionArea").innerHTML = html;
+  /* ====================================
+     昼
+  ==================================== */
+
+  else if (
+    room.phase === "day"
+  ) {
+
+    if (targets.length) {
+
+      html +=
+        targets
+          .map(
+            player =>
+              `<button
+                class="target"
+                data-action="vote"
+                data-id="${esc(player.id)}"
+              >
+                🗳️ ${esc(player.name)}に投票
+              </button>`
+          )
+          .join("");
+
+    } else {
+
+      html +=
+        "<p>投票できる相手がいません。</p>";
+
+    }
+
+  }
+
+
+  /* その他 */
+
+  else {
+
+    html +=
+      "<p>現在は待機中です。</p>";
+
+  }
+
+
+  actionArea.innerHTML =
+    html;
+
+
+  /* ====================================
+     夜ボタン
+  ==================================== */
+
+  actionArea
+    .querySelectorAll(
+      "[data-action='night']"
+    )
+    .forEach(
+      button => {
+
+        button.addEventListener(
+          "click",
+          () => {
+
+            night(
+              button.dataset.id
+            );
+
+          }
+        );
+
+      }
+    );
+
+
+  /* ====================================
+     投票ボタン
+  ==================================== */
+
+  actionArea
+    .querySelectorAll(
+      "[data-action='vote']"
+    )
+    .forEach(
+      button => {
+
+        button.addEventListener(
+          "click",
+          () => {
+
+            vote(
+              button.dataset.id
+            );
+
+          }
+        );
+
+      }
+    );
+
+}
+
+
+/* ====================================
+   プレイヤー一覧
+==================================== */
+
+function renderPlayers(players) {
+
+  const playersElement =
+    $("players");
+
+
+  if (!playersElement) {
+
+    console.error(
+      'HTMLに id="players" がありません。'
+    );
+
+    return;
+  }
+
+
+  if (!Array.isArray(players)) {
+
+    playersElement.innerHTML =
+      "<p>参加者情報を取得できませんでした。</p>";
+
+    return;
+  }
+
+
+  if (players.length === 0) {
+
+    playersElement.innerHTML =
+      "<p>まだプレイヤーがいません。</p>";
+
+    return;
+  }
+
+
+  /*
+   * ★ここで全員を表示
+   */
+
+  playersElement.innerHTML =
+    players
+      .map(
+        player => `
+
+          <div
+            class="player ${
+              player.alive === false
+                ? "dead"
+                : ""
+            }"
+          >
+
+            <span>
+
+              ${esc(
+                player.name ||
+                "名前なし"
+              )}
+
+              ${
+                player.id === myId
+                  ? "（自分）"
+                  : ""
+              }
+
+            </span>
+
+
+            <span>
+
+              ${
+                player.host
+                  ? "👑"
+                  : ""
+              }
+
+              ${
+                player.gm ||
+                player.gameMaster
+                  ? "🎮"
+                  : ""
+              }
+
+              ${
+                player.alive === false
+                  ? "⚫"
+                  : "🟢"
+              }
+
+            </span>
+
+          </div>
+
+        `
+      )
+      .join("");
+
+}
+
+
+/* ====================================
+   ルーム画面更新
+==================================== */
+
+function updateRoomScreen(data) {
+
+  if (!data) return;
+
+
+  room = data;
+
+
+  const players =
+    Array.isArray(data.players)
+      ? data.players
+      : [];
+
+
+  removeClass(
+    "room",
+    "hidden"
+  );
+
+
+  setText(
+    "roomCode",
+    data.code || ""
+  );
+
+
+  /* ====================================
+     フェーズ
+  ==================================== */
+
+  if (
+    data.phase === "lobby"
+  ) {
+
+    setText(
+      "phase",
+      `待機中：${players.length}/10人`
+    );
+
+  }
+
+  else if (
+    data.phase === "night"
+  ) {
+
+    setText(
+      "phase",
+      `🌙 ${data.day || 1}日目・夜`
+    );
+
+  }
+
+  else if (
+    data.phase === "day"
+  ) {
+
+    setText(
+      "phase",
+      `☀️ ${data.day || 1}日目・昼`
+    );
+
+  }
+
+  else if (
+    data.phase === "finished"
+  ) {
+
+    setText(
+      "phase",
+      "ゲーム終了"
+    );
+
+  }
+
+  else {
+
+    setText(
+      "phase",
+      "ゲーム進行中"
+    );
+
+  }
+
+
+  /* ====================================
+     ★人数表示
+  ==================================== */
+
+  setText(
+    "playerCount",
+    `${players.length} / 10人`
+  );
+
+
+  /* ====================================
+     ★プレイヤー一覧
+  ==================================== */
+
+  renderPlayers(
+    players
+  );
+
+
+  /* ====================================
+     自分
+  ==================================== */
+
+  const me =
+    players.find(
+      player =>
+        player.id === myId
+    );
+
+
+  /* ====================================
+     ゲーム開始ボタン
+  ==================================== */
+
+  toggleClass(
+    "start",
+    "hidden",
+    !(
+      me &&
+      me.host &&
+      !data.started
+    )
+  );
+
+
+  /* ====================================
+     管理者リセット
+  ==================================== */
+
+  toggleClass(
+    "reset",
+    "hidden",
+    data.ownerId !== myId
+  );
+
+
+  /* ====================================
+     GM判定
+  ==================================== */
+
+  const isGM =
+    data.gameMasterId === myId ||
+    data.gmId === myId ||
+    data.isGM === true ||
+    me?.gm === true ||
+    me?.gameMaster === true;
+
+
+  const gmLabel =
+    $("gmLabel");
+
+
+  if (gmLabel) {
+
+    gmLabel.textContent =
+      isGM
+        ? "👑 ゲームマスター"
+        : "";
+
+  }
+
+
+  /* ====================================
+     ゲーム画面
+  ==================================== */
+
+  if (
+    data.started
+  ) {
+
+    removeClass(
+      "game",
+      "hidden"
+    );
+
+  }
+
+  else {
+
+    addClass(
+      "game",
+      "hidden"
+    );
+
+  }
+
+
+  /* ====================================
+     ゲーム終了
+  ==================================== */
+
+  if (
+    data.phase === "finished"
+  ) {
+
+    setHTML(
+      "actionArea",
+      `
+      <div class="winner">
+
+        🏆 ${
+          esc(
+            data.winner ||
+            "ゲーム終了"
+          )
+        }の勝利！
+
+      </div>
+      `
+    );
+
+    return;
+  }
+
+
+  /* ====================================
+     ロビー
+  ==================================== */
+
+  if (
+    !data.started ||
+    data.phase === "lobby"
+  ) {
+
+    addClass(
+      "game",
+      "hidden"
+    );
+
+
+    setHTML(
+      "actionArea",
+      ""
+    );
+
+
+    return;
+  }
+
+
+  /* ====================================
+     ゲーム中
+  ==================================== */
+
+  render();
 
 }
 
@@ -171,31 +798,79 @@ function connect() {
   }
 
 
-  socket = io(
-    window.location.origin,
-    {
-      transports: [
-        "polling",
-        "websocket"
-      ],
-      upgrade: true
-    }
-  );
+  socket =
+    io(
+      window.location.origin,
+      {
+        transports: [
+          "polling",
+          "websocket"
+        ],
 
+        upgrade: true,
+
+        reconnection: true,
+
+        reconnectionAttempts:
+          Infinity,
+
+        reconnectionDelay:
+          1000
+      }
+    );
+
+
+  /* ====================================
+     接続成功
+  ==================================== */
 
   socket.on(
     "connect",
     () => {
 
-      myId = socket.id;
+      myId =
+        socket.id;
+
 
       msg(
         "サーバーに接続しました。"
       );
 
+
+      console.log(
+        "Socket connected:",
+        myId
+      );
+
     }
   );
 
+
+  /* ====================================
+     切断
+  ==================================== */
+
+  socket.on(
+    "disconnect",
+    reason => {
+
+      msg(
+        "サーバーとの接続が切れました。再接続しています…"
+      );
+
+
+      console.warn(
+        "Socket disconnected:",
+        reason
+      );
+
+    }
+  );
+
+
+  /* ====================================
+     接続エラー
+  ==================================== */
 
   socket.on(
     "connect_error",
@@ -203,31 +878,47 @@ function connect() {
 
       msg(
         "サーバー接続エラー: " +
-        error.message
+        (
+          error?.message ||
+          "不明なエラー"
+        )
+      );
+
+
+      console.error(
+        "Socket connection error:",
+        error
       );
 
     }
   );
 
 
-  /* ================================
+  /* ====================================
      ルームに入った
-  ================================= */
+  ==================================== */
 
   socket.on(
     "room:joined",
     ({ code }) => {
 
-      $("home")
-        .classList
-        .add("hidden");
+      addClass(
+        "home",
+        "hidden"
+      );
 
-      $("room")
-        .classList
-        .remove("hidden");
 
-      $("roomCode")
-        .textContent = code;
+      removeClass(
+        "room",
+        "hidden"
+      );
+
+
+      setText(
+        "roomCode",
+        code || ""
+      );
+
 
       msg(
         "ルームに入りました！"
@@ -237,190 +928,49 @@ function connect() {
   );
 
 
-  /* ================================
-     ルーム情報更新
-  ================================= */
+  /* ====================================
+     ★ルーム情報更新
+  ==================================== */
 
   socket.on(
     "room:update",
     data => {
 
-      room = data;
+      console.log(
+        "room:update:",
+        data
+      );
 
 
-      $("room")
-        .classList
-        .remove("hidden");
+      if (!data) {
 
+        console.error(
+          "room:update にデータがありません。"
+        );
 
-      $("roomCode")
-        .textContent = data.code;
-
-
-      /* フェーズ表示 */
-
-      if (
-        data.phase === "lobby"
-      ) {
-
-        $("phase")
-          .textContent =
-          `待機中：${data.players.length}/10人`;
-
-      } else if (
-        data.phase === "night"
-      ) {
-
-        $("phase")
-          .textContent =
-          `🌙 ${data.day}日目・夜`;
-
-      } else if (
-        data.phase === "day"
-      ) {
-
-        $("phase")
-          .textContent =
-          `☀️ ${data.day}日目・昼`;
-
-      } else {
-
-        $("phase")
-          .textContent =
-          "ゲーム終了";
-
+        return;
       }
 
 
-      /* プレイヤー一覧 */
+      try {
 
-      $("players").innerHTML =
-        data.players
-          .map(
-            player =>
-              `<div
-                class="player ${
-                  player.alive
-                    ? ""
-                    : "dead"
-                }"
-              >
+        updateRoomScreen(
+          data
+        );
 
-                <span>
+      }
 
-                  ${esc(player.name)}
+      catch (error) {
 
-                  ${
-                    player.id === myId
-                      ? "（自分）"
-                      : ""
-                  }
-
-                </span>
-
-                <span>
-
-                  ${
-                    player.host
-                      ? "👑"
-                      : ""
-                  }
-
-                  ${
-                    player.alive
-                      ? "🟢"
-                      : "⚫"
-                  }
-
-                </span>
-
-              </div>`
-          )
-          .join("");
-
-
-      /* ================================
-         ゲーム開始ボタン
-      ================================= */
-
-      const me =
-        data.players.find(
-          player =>
-            player.id === myId
+        console.error(
+          "room:update の画面更新中にエラー:",
+          error
         );
 
 
-      $("start")
-        .classList
-        .toggle(
-          "hidden",
-          !(
-            me &&
-            me.host &&
-            !data.started
-          )
+        msg(
+          "画面更新中にエラーが発生しました。"
         );
-
-
-      /* ================================
-         ★管理者リセットボタン
-      ================================= */
-
-      $("reset")
-        .classList
-        .toggle(
-          "hidden",
-          data.ownerId !== myId
-        );
-
-
-      /* ゲーム画面 */
-
-      if (data.started) {
-
-        $("game")
-          .classList
-          .remove("hidden");
-
-      }
-
-
-      /* ゲーム終了 */
-
-      if (
-        data.phase === "finished"
-      ) {
-
-        $("actionArea")
-          .innerHTML =
-          `<div class="winner">
-            🏆 ${data.winner}の勝利！
-          </div>`;
-
-      }
-
-
-      /* 待機画面 */
-
-      else if (
-        data.phase === "lobby"
-      ) {
-
-        $("game")
-          .classList
-          .add("hidden");
-
-        $("actionArea")
-          .innerHTML = "";
-
-      }
-
-
-      /* ゲーム中 */
-
-      else {
-
-        render();
 
       }
 
@@ -428,35 +978,57 @@ function connect() {
   );
 
 
-  /* ================================
+  /* ====================================
      役職
-  ================================= */
+  ==================================== */
 
   socket.on(
     "game:role",
     data => {
 
-      myRole = data.role;
-
-      actionDone = false;
-
-
-      $("game")
-        .classList
-        .remove("hidden");
+      myRole =
+        data?.role ||
+        null;
 
 
-      $("roleTitle")
-        .textContent =
-        "あなたの役職";
+      actionDone =
+        false;
 
 
-      $("roleText")
-        .innerHTML =
-        `<div class="role">
-          ${emoji(data.role)}
-          ${data.role}
-        </div>`;
+      removeClass(
+        "game",
+        "hidden"
+      );
+
+
+      setText(
+        "roleTitle",
+        "あなたの役職"
+      );
+
+
+      if (
+        data?.role
+      ) {
+
+        setHTML(
+          "roleText",
+          `
+          <div class="role">
+
+            ${emoji(
+              data.role
+            )}
+
+            ${esc(
+              data.role
+            )}
+
+          </div>
+          `
+        );
+
+      }
 
 
       render();
@@ -465,54 +1037,66 @@ function connect() {
   );
 
 
-  /* ================================
-     占い結果
-  ================================= */
+  /* ====================================
+     行動結果
+  ==================================== */
 
   socket.on(
     "action:result",
     data => {
 
-      msg(data.text);
+      msg(
+        data?.text ||
+        ""
+      );
 
     }
   );
 
 
-  /* ================================
+  /* ====================================
      エラー
-  ================================= */
+  ==================================== */
 
   socket.on(
     "error:msg",
     text => {
 
-      msg(text);
+      msg(
+        text ||
+        "エラーが発生しました。"
+      );
 
     }
   );
 
 
-  /* ================================
+  /* ====================================
      ★リセット通知
-  ================================= */
+  ==================================== */
 
   socket.on(
     "room:reset",
     data => {
 
-      myRole = null;
-
-      actionDone = false;
-
-
-      $("game")
-        .classList
-        .add("hidden");
+      myRole =
+        null;
 
 
-      $("actionArea")
-        .innerHTML = "";
+      actionDone =
+        false;
+
+
+      addClass(
+        "game",
+        "hidden"
+      );
+
+
+      setHTML(
+        "actionArea",
+        ""
+      );
 
 
       msg(
@@ -523,203 +1107,353 @@ function connect() {
     }
   );
 
+
+  /* ====================================
+     ★GM進行通知
+  ==================================== */
+
+  socket.on(
+    "gm:updated",
+    data => {
+
+      actionDone =
+        false;
+
+
+      if (
+        data?.room
+      ) {
+
+        updateRoomScreen(
+          data.room
+        );
+
+      }
+
+
+      msg(
+        data?.message ||
+        "ゲームマスターがゲームを進行しました。"
+      );
+
+    }
+  );
+
 }
 
 
-/* Socket.IO開始 */
+/* ====================================
+   Socket.IO開始
+==================================== */
 
 connect();
 
 
 /* ====================================
-   ルーム作成
+   ボタン設定
 ==================================== */
 
-$("create").onclick = () => {
+function setupButtons() {
 
-  if (!socket?.connected) {
+  /* ====================================
+     ルーム作成
+  ==================================== */
 
-    return msg(
-      "サーバーに接続中です。少し待ってください。"
-    );
-
-  }
-
-
-  socket.emit(
-    "room:create",
-    {
-      name:
-        $("name").value
-    }
-  );
-
-};
-
-
-/* ====================================
-   ルーム参加
-==================================== */
-
-$("join").onclick = () => {
-
-  if (!socket?.connected) {
-
-    return msg(
-      "サーバーに接続中です。少し待ってください。"
-    );
-
-  }
-
-
-  socket.emit(
-    "room:join",
-    {
-      name:
-        $("name").value,
-
-      code:
-        $("code").value
-    }
-  );
-
-};
-
-
-/* ====================================
-   ゲーム開始
-==================================== */
-
-$("start").onclick = () => {
-
-  if (!socket?.connected) {
-    return;
-  }
-
-  socket.emit(
-    "game:start"
-  );
-
-};
-
-
-/* ====================================
-   ★管理者リセット
-==================================== */
-
-$("reset").onclick = () => {
-
-  if (!socket?.connected) {
-
-    return msg(
-      "サーバーに接続中です。"
-    );
-
-  }
+  const createButton =
+    $("create");
 
 
   if (
-    !room ||
-    room.ownerId !== myId
+    createButton
   ) {
 
-    return msg(
-      "リセットできるのは管理者だけです。"
-    );
+    createButton.onclick =
+      () => {
+
+        if (
+          !socket?.connected
+        ) {
+
+          return msg(
+            "サーバーに接続中です。少し待ってください。"
+          );
+
+        }
+
+
+        socket.emit(
+          "room:create",
+          {
+            name:
+              $("name")?.value ||
+              ""
+          }
+        );
+
+      };
 
   }
 
 
-  const confirmed =
-    confirm(
-      "ゲームをリセットしますか？\n\n" +
-      "全員をこのルームに残したまま、" +
-      "ゲームを待機状態に戻します。"
-    );
+  /* ====================================
+     ルーム参加
+  ==================================== */
+
+  const joinButton =
+    $("join");
 
 
-  if (!confirmed) {
-    return;
+  if (
+    joinButton
+  ) {
+
+    joinButton.onclick =
+      () => {
+
+        if (
+          !socket?.connected
+        ) {
+
+          return msg(
+            "サーバーに接続中です。少し待ってください。"
+          );
+
+        }
+
+
+        socket.emit(
+          "room:join",
+          {
+            name:
+              $("name")?.value ||
+              "",
+
+            code:
+              $("code")?.value ||
+              ""
+          }
+        );
+
+      };
+
   }
 
 
-  socket.emit(
-    "room:reset"
+  /* ====================================
+     ゲーム開始
+  ==================================== */
+
+  const startButton =
+    $("start");
+
+
+  if (
+    startButton
+  ) {
+
+    startButton.onclick =
+      () => {
+
+        if (
+          !socket?.connected
+        ) {
+
+          return;
+        }
+
+
+        socket.emit(
+          "game:start"
+        );
+
+      };
+
+  }
+
+
+  /* ====================================
+     管理者リセット
+  ==================================== */
+
+  const resetButton =
+    $("reset");
+
+
+  if (
+    resetButton
+  ) {
+
+    resetButton.onclick =
+      () => {
+
+        if (
+          !socket?.connected
+        ) {
+
+          return msg(
+            "サーバーに接続されていません。"
+          );
+
+        }
+
+
+        if (
+          !room ||
+          room.ownerId !== myId
+        ) {
+
+          return msg(
+            "リセットできるのは管理者だけです。"
+          );
+
+        }
+
+
+        const confirmed =
+          confirm(
+            "ゲームをリセットしますか？\n\n" +
+            "全員をこのルームに残したまま、" +
+            "ゲームを待機状態に戻します。"
+          );
+
+
+        if (
+          !confirmed
+        ) {
+
+          return;
+        }
+
+
+        socket.emit(
+          "room:reset"
+        );
+
+      };
+
+  }
+
+}
+
+
+/* ====================================
+   DOM読み込み後にボタン設定
+==================================== */
+
+if (
+  document.readyState === "loading"
+) {
+
+  document.addEventListener(
+    "DOMContentLoaded",
+    setupButtons
   );
 
-};
+}
+
+else {
+
+  setupButtons();
+
+}
 
 
 /* ====================================
    夜の行動
 ==================================== */
 
-window.night = id => {
+window.night =
+  (id) => {
 
-  if (!socket?.connected) {
-    return;
-  }
+    if (
+      !socket?.connected
+    ) {
 
-
-  let action;
-
-
-  if (
-    myRole === "人狼"
-  ) {
-
-    action = "wolf";
-
-  } else if (
-    myRole === "占い師"
-  ) {
-
-    action = "seer";
-
-  } else {
-
-    action = "guard";
-
-  }
-
-
-  socket.emit(
-    "action:night",
-    {
-      action: action,
-      targetId: id
+      return;
     }
-  );
 
 
-  actionDone = true;
+    let action;
 
-  render();
 
-};
+    if (
+      myRole === "人狼"
+    ) {
+
+      action =
+        "wolf";
+
+    }
+
+    else if (
+      myRole === "占い師"
+    ) {
+
+      action =
+        "seer";
+
+    }
+
+    else if (
+      myRole === "騎士"
+    ) {
+
+      action =
+        "guard";
+
+    }
+
+    else {
+
+      return;
+    }
+
+
+    socket.emit(
+      "action:night",
+      {
+        action,
+        targetId: id
+      }
+    );
+
+
+    actionDone =
+      true;
+
+
+    render();
+
+  };
 
 
 /* ====================================
    投票
 ==================================== */
 
-window.vote = id => {
+window.vote =
+  (id) => {
 
-  if (!socket?.connected) {
-    return;
-  }
+    if (
+      !socket?.connected
+    ) {
 
-
-  socket.emit(
-    "action:vote",
-    {
-      targetId: id
+      return;
     }
-  );
 
 
-  actionDone = true;
+    socket.emit(
+      "action:vote",
+      {
+        targetId: id
+      }
+    );
 
-  render();
 
-};
+    actionDone =
+      true;
+
+
+    render();
+
+  };

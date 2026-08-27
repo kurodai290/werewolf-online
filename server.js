@@ -7,7 +7,7 @@ const app=express();
 const server=http.createServer(app);
 const io=new Server(server,{transports:["polling","websocket"],cors:{origin:true,methods:["GET","POST"]}});
 const PORT=process.env.PORT||3000;
-const MAX_PLAYERS=10, MIN_PLAYERS=5;
+const MAX_PLAYERS=10, MIN_PLAYERS=3;
 app.use(express.static("public"));
 const rooms=new Map();
 
@@ -86,6 +86,15 @@ io.on("connection",socket=>{
   if(r.phase==="night"){resolveNight(r);return}
   if(r.phase==="day"){const w=winner(r);if(w){r.phase="finished";r.started=false;r.winner=w;update(r)}else startNight(r);return}
   socket.emit("error:msg","今は次の日へ進めません。")
+ });
+ socket.on("chat:send",({channel,text})=>{
+  const r=getRoom(socket);
+  if(!r)return socket.emit("error:msg","ルームに参加していません。");
+  text=String(text||"").trim().slice(0,200);
+  if(!text)return;
+  const allowed=chatChannel(r,socket,channel);
+  if(!allowed)return socket.emit("error:msg","このチャットは使用できません。");
+  sendChat(r,socket,allowed,text);
  });
  socket.on("action:night",({action,targetId})=>{
   const r=getRoom(socket);if(!r||r.phase!=="night")return;const me=r.players.find(p=>p.id===socket.id),t=r.players.find(p=>p.id===targetId);if(!me||!me.alive||!t||!t.alive||me.id===t.id)return;
